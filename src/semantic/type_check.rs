@@ -1,14 +1,17 @@
 use crate::{
     ast::{BinaryOp, Block, Decl, Expr, Init, Stmt, UnaryOp},
-    semantic::{symbol_table::SymbolTable, types::Ty},
+    semantic::{
+        environment::{Environement, FunctionContext},
+        types::Ty,
+    },
 };
 
 pub trait TypeCheck {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty;
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty;
 }
 
 impl TypeCheck for String {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         if let Some(ty) = env.lookup(&self) {
             ty.clone()
         } else {
@@ -19,7 +22,7 @@ impl TypeCheck for String {
 }
 
 impl TypeCheck for Expr {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         use Expr::*;
         match self {
             Group(expr) => expr.check_type(env, errs),
@@ -115,7 +118,7 @@ impl TypeCheck for Expr {
 }
 
 impl TypeCheck for Decl {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         use Decl::*;
         match self {
             Var { id, ty, init } => {
@@ -136,36 +139,18 @@ impl TypeCheck for Decl {
             Func { id, sig, body } => {
                 // treat function as special and do not call <Block as TypeCheck>::check_type
                 env.enter();
+                let ret_ty = (&sig.ret_ty).into();
+                env.func_ctx = Some(FunctionContext { ret_ty });
                 // inject parameters into the environment
                 sig.params
                     .iter()
                     .for_each(|p| env.bind(&p.id, (&p.ty).into()));
 
-                // conditional control flow analysis...
-                let mut ret_guaranteed = false;
-                let mut body_ret_tys = Vec::new();
                 for stmt in body.0.iter() {
-                    let ty = stmt.check_type(env, errs);
-                    if matches!(stmt, Stmt::Ret(_)) {
-                        ret_guaranteed = true;
-                    }
-                    body_ret_tys.push(ty);
+                    stmt.check_type(env, errs);
                 }
 
-                let ret_ty = (&sig.ret_ty).into();
-                if let Some(ty) = body_ret_tys
-                    .iter()
-                    .find(|&ty| ty != &Ty::Void && ty != &Ty::Unknown && ty != &ret_ty)
-                {
-                    errs.push(format!(
-                        "mismatched return type in funciton {id}, expected {ret_ty}, found {ty}"
-                    ));
-                }
-                if !ret_guaranteed && ret_ty != Ty::Void {
-                    errs.push(format!(
-                        "function {id} doesn't return in all possible pathes"
-                    ));
-                }
+                env.func_ctx = None;
                 env.leave();
                 env.bind(id, sig.into());
             }
@@ -176,7 +161,7 @@ impl TypeCheck for Decl {
 }
 
 impl TypeCheck for Init {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         use Init::*;
         match self {
             Arr(exprs) => {
@@ -204,24 +189,35 @@ impl TypeCheck for Init {
 }
 
 impl TypeCheck for Block {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         env.enter();
-        let mut ret_ty = Ty::Void;
         for stmt in self.0.iter() {
-            ret_ty = stmt.check_type(env, errs);
+            stmt.check_type(env, errs);
         }
         env.leave();
-        ret_ty
+        Ty::Void
     }
 }
 
 impl TypeCheck for Stmt {
-    fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+    fn check_type(&self, env: &mut Environement, errs: &mut Vec<String>) -> Ty {
         use Stmt::*;
         match self {
-            Decl(decl) => decl.check_type(env, errs),
-            Expr(expr) => expr.check_type(env, errs),
-            Ret(expr) => expr.check_type(env, errs),
+            Decl(decl) => {
+                decl.check_type(env, errs);
+            }
+            Expr(expr) => {
+                expr.check_type(env, errs);
+            }
+            Ret(expr) => {
+                let ty = expr.check_type(env, errs);
+                let ret_ty = &env.func_ctx.as_ref().unwrap().ret_ty;
+                if &ty != ret_ty {
+                    errs.push(format!(
+                        "return type doesn't match function return type, expect {ret_ty}, found {ty}"
+                    ));
+                }
+            }
             If {
                 cond,
                 t_branch,
@@ -238,10 +234,8 @@ impl TypeCheck for Stmt {
                 if t_ty != Ty::Void {
                     return t_ty;
                 }
-                if let Some(f_branch) = f_branch {
-                    f_branch.check_type(env, errs)
-                } else {
-                    Ty::Void
+                if let Some(block) = f_branch {
+                    block.check_type(env, errs);
                 }
             }
             For {
@@ -265,9 +259,12 @@ impl TypeCheck for Stmt {
                     update.check_type(env, errs);
                 }
 
-                body.check_type(env, errs)
+                body.check_type(env, errs);
             }
-            Block(block) => block.check_type(env, errs),
+            Block(block) => {
+                block.check_type(env, errs);
+            }
         }
+        Ty::Void
     }
 }
