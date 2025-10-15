@@ -1,0 +1,112 @@
+use crate::ast::*;
+
+use std::str::FromStr;
+
+grammar;
+
+Id: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+Int: i32 = r"[0-9]+" => i32::from_str(<>).unwrap();
+Str: String = r#""[^"]*""# => <>.to_string();
+Char: char = r"'[^']'" => <>.chars().nth(1).unwrap();
+
+Deli<T, D>: Vec<T> = <mut v:(<T> D)*> <e:T?> => match e {
+  None => v,
+  Some(e) => {
+    v.push(e);
+    v
+  }
+};
+
+pub Program: Program = Decl* => Program(<>);
+
+pub Decl: Decl = {
+  <id:Id> ":" <ty:Ty> <init:("=" <Init>)?> ";" => Decl::Var { id, ty, init },
+  // external function
+  <id:Id> ":" <sig:FuncSig> ";" => Decl::ExternFunc { id, sig },
+  <id:Id> ":" <sig:FuncSig> "=" <body:Block> => Decl::Func { id, sig, body },
+};
+
+pub Ty: Ty = {
+  "integer" => Ty::Int,
+  "boolean" => Ty::Bool,
+  "char" => Ty::Char,
+  "string" => Ty::Str,
+  "array" "[" <arr_size:Int?> "]" <ty:Ty> => Ty::Arr { arr_size, ty: Box::new(ty) },
+  "void" => Ty::Void,
+};
+
+pub Init: Init = {
+  // array initializer
+  "{" <Deli<Expr, ",">> "}" => Init::Arr(<>),
+  Expr => Init::Expr(<>),
+};
+
+pub FuncSig: FuncSig = "function" <ret_ty:Ty> "(" <params:Deli<Param, ",">> ")" => FuncSig { ret_ty, params };
+
+pub Param: Param = <id:Id> ":" <ty:Ty> => Param { id, ty };
+
+pub Block: Block = "{" <Stmt*> "}" => Block(<>);
+
+pub Expr: Expr = {
+  #[precedence(level = "0")]
+  // group
+  "(" <Expr> ")" => Expr::Group(Box::new(<>)),
+  // identifier
+  Id => Expr::Id(<>),
+  Int => Expr::Int(<>),
+  Str => Expr::Str(<>),
+  Char => Expr::Char(<>),
+  // boolean
+  "true" => Expr::Bool(Bool::True),
+  "false" => Expr::Bool(Bool::False),
+  #[precedence(level = "1")]
+  // array subscript
+  <id:Id> "[" <index:Expr> "]" => Expr::ArrSubscript { id, index: Box::new(index) },
+  // function call
+  <id:Id> "(" <args:Deli<Expr, ",">> ")" => Expr::FuncCall { id, args },
+  #[precedence(level = "2")] #[assoc(side = "right")]
+  // postfix increment, decrement
+  <Expr> "++" => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Incre },
+  <Expr> "--" => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Decre },
+  #[precedence(level = "3")] #[assoc(side = "right")]
+  // unary negation
+  "-" <Expr> => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Neg },
+  // logical not
+  "!" <Expr> => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Not },
+  #[precedence(level = "4")] #[assoc(side = "right")]
+  // exponentiation
+  <le:Expr> "^" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Exp, re: Box::new(re) },
+  #[precedence(level = "5")] #[assoc(side = "left")]
+  // multiplication, division, modulus
+  <le:Expr> "*" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Mul, re: Box::new(re) },
+  <le:Expr> "/" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Div, re: Box::new(re) },
+  <le:Expr> "%" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Mod, re: Box::new(re) },
+  #[precedence(level = "6")] #[assoc(side = "left")]
+  // addition, subtraction
+  <le:Expr> "+" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Add, re: Box::new(re) },
+  <le:Expr> "-" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Sub, re: Box::new(re) },
+  #[precedence(level = "7")] #[assoc(side = "left")]
+  // comparison
+  <le:Expr> "<" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Lt, re: Box::new(re) },
+  <le:Expr> "<=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Le, re: Box::new(re) },
+  <le:Expr> ">" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Gt, re: Box::new(re) },
+  <le:Expr> ">=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Ge, re: Box::new(re) },
+  <le:Expr> "==" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Eq, re: Box::new(re) },
+  <le:Expr> "!=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::NotEq, re: Box::new(re) },
+  #[precedence(level = "8")] #[assoc(side = "left")]
+  // logical and, logical or
+  <le:Expr> "&&" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::And, re: Box::new(re) },
+  <le:Expr> "||" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Or, re: Box::new(re) },
+  #[precedence(level = "9")] #[assoc(side = "right")]
+  // assignment
+  <lv:Id> "=" <expr:Expr> => Expr::Assign { lv, expr: Box::new(expr) },
+};
+
+pub Stmt: Stmt = {
+  Decl => Stmt::Decl(<>),
+  <Expr> ";" => Stmt::Expr(<>),
+  "return" <Expr> ";" => Stmt::Ret(<>),
+  "if" "(" <cond:Expr> ")" <t_branch:Block> <f_branch:("else" <Block>)?> => Stmt::If { cond, t_branch, f_branch },
+  "for" "(" <init:Expr?> ";" <cond:Expr?> ";" <update:Expr?> ")" <body:Block> => Stmt::For { init, cond, update, body },
+  Block => Stmt::Block(<>),
+};
