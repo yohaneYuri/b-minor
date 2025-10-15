@@ -5,6 +5,8 @@ fn main() {
         square: function integer (x: integer) = {
             if (1 > 2) {
                 return 1;
+            } else {
+                return 2;
             }
         }
     ";
@@ -13,5 +15,6 @@ fn main() {
         .parse(src)
         .unwrap()
         .semantic_check()
-        .iter().for_each(|e| eprintln!("{e}"));
+        .iter()
+        .for_each(|e| eprintln!("{e}"));
 }

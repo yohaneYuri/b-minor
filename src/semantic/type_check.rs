@@ -30,7 +30,7 @@ impl TypeCheck for Expr {
             Char(_) => Ty::Char,
             ArrSubscript { id, index } => {
                 let index_ty = index.check_type(env, errs);
-                if index_ty != Ty::Int {
+                if index_ty != Ty::Unknown && index_ty != Ty::Int {
                     errs.push(format!("array index must be integer, found {index_ty}"));
                 }
                 id.check_type(env, errs)
@@ -44,49 +44,56 @@ impl TypeCheck for Expr {
                     Ty::Unknown
                 }
             }
-            Unary { expr, op } => match op {
-                UnaryOp::Incre | UnaryOp::Neg | UnaryOp::Decre => {
-                    let expr_ty = expr.check_type(env, errs);
-                    if expr_ty != Ty::Int {
-                        errs.push(format!("target must be integer, found {expr_ty}"));
+            Unary { expr, op } => {
+                let expr_ty = expr.check_type(env, errs);
+                let (expected_ty, err_msg) = match op {
+                    UnaryOp::Incre | UnaryOp::Neg | UnaryOp::Decre => {
+                        (Ty::Int, format!("target must be integer, found {expr_ty}"))
                     }
-                    Ty::Int
+                    UnaryOp::Not => (
+                        Ty::Bool,
+                        format!("logical operation {op} must be applied boolean, found {expr_ty}"),
+                    ),
+                };
+                if expr_ty != Ty::Unknown && expr_ty != expected_ty {
+                    errs.push(err_msg);
                 }
-                UnaryOp::Not => {
-                    let expr_ty = expr.check_type(env, errs);
-                    if expr_ty != Ty::Bool {
-                        errs.push(format!(
-                            "logical operation {op} must be applied boolean, found {expr_ty}"
-                        ));
-                    }
-                    Ty::Bool
-                }
-            },
+                expected_ty
+            }
             Binary { le, op, re } => {
                 use BinaryOp::*;
+                let l_ty = le.check_type(env, errs);
+                let r_ty = re.check_type(env, errs);
+                let unified_ty = match (l_ty, r_ty) {
+                    (l, Ty::Unknown) => l,
+                    (Ty::Unknown, r) => r,
+                    (l, r) if l == r => l,
+                    _ => Ty::Unknown,
+                };
                 match op {
                     Exp | Mul | Div | Mod | Add | Sub => {
-                        let l_ty = le.check_type(env, errs);
-                        let r_ty = re.check_type(env, errs);
-                        if l_ty != Ty::Int || r_ty != Ty::Int {
-                            errs.push(format!("arithmetic operation {op} can only be applied to integers"));
+                        if unified_ty != Ty::Int || unified_ty == Ty::Unknown {
+                            errs.push(format!(
+                                "arithmetic operation {op} can only be applied to integers"
+                            ));
                         }
                         Ty::Int
                     }
                     Gt | Ge | Lt | Le | Eq | NotEq => {
-                        let l_ty = le.check_type(env, errs);
-                        let r_ty = re.check_type(env, errs);
-                        if l_ty != r_ty {
+                        if unified_ty == Ty::Unknown {
                             errs.push(format!(
-                                "comparison operations {op} can only be applied to the same types"
+                                "comparison operation {op} can only be applied to the same types"
+                            ));
+                        } else if matches!(unified_ty, Ty::Void | Ty::Func { .. } | Ty::Arr { .. })
+                        {
+                            errs.push(format!(
+                                "comparison operation {op} cannot be applied to {unified_ty}"
                             ));
                         }
                         Ty::Bool
                     }
                     And | Or => {
-                        let l_ty = le.check_type(env, errs);
-                        let r_ty = re.check_type(env, errs);
-                        if l_ty != Ty::Bool || r_ty != Ty::Bool {
+                        if unified_ty != Ty::Bool || unified_ty == Ty::Unknown {
                             errs.push(format!("logical operation {op} must be applied booleans"));
                         }
                         Ty::Bool
@@ -118,7 +125,7 @@ impl TypeCheck for Decl {
                         errs.push(format!("variable's type cannot be void"));
                     }
                     let init_ty = init.check_type(env, errs);
-                    if init_ty != anno_ty {
+                    if init_ty != anno_ty && init_ty != Ty::Unknown {
                         errs.push(format!(
                             "mismatched initializer type, expected {anno_ty}, found {init_ty}"
                         ));
@@ -127,19 +134,40 @@ impl TypeCheck for Decl {
                 }
             }
             Func { id, sig, body } => {
+                // treat function as special and do not call <Block as TypeCheck>::check_type
                 env.enter();
-                sig.params.iter().for_each(|p| env.bind(&p.id, (&p.ty).into()));
-                let body_ret_ty = body.check_type(env, errs);
-                env.leave();
+                // inject parameters into the environment
+                sig.params
+                    .iter()
+                    .for_each(|p| env.bind(&p.id, (&p.ty).into()));
+
+                // conditional control flow analysis...
+                let mut ret_guaranteed = false;
+                let mut body_ret_tys = Vec::new();
+                for stmt in body.0.iter() {
+                    let ty = stmt.check_type(env, errs);
+                    if matches!(stmt, Stmt::Ret(_)) {
+                        ret_guaranteed = true;
+                    }
+                    body_ret_tys.push(ty);
+                }
 
                 let ret_ty = (&sig.ret_ty).into();
-                if body_ret_ty != ret_ty {
+                if let Some(ty) = body_ret_tys
+                    .iter()
+                    .find(|&ty| ty != &Ty::Void && ty != &Ty::Unknown && ty != &ret_ty)
+                {
                     errs.push(format!(
-                        "mismatched return type in funciton {id}, expected {ret_ty}, found {body_ret_ty}"
+                        "mismatched return type in funciton {id}, expected {ret_ty}, found {ty}"
                     ));
                 }
+                if !ret_guaranteed && ret_ty != Ty::Void {
+                    errs.push(format!(
+                        "function {id} doesn't return in all possible pathes"
+                    ));
+                }
+                env.leave();
                 env.bind(id, sig.into());
-
             }
             _ => {}
         }
@@ -162,7 +190,11 @@ impl TypeCheck for Init {
                     errs.push(format!("elements in an array must have the same type"));
                 }
                 Ty::Arr {
-                    arr_size: Some(if pred != Ty::Unknown { types.len() as i32 } else { 0 }),
+                    arr_size: Some(if pred != Ty::Unknown {
+                        types.len() as i32
+                    } else {
+                        0
+                    }),
                     ty: Box::new(pred),
                 }
             }
@@ -173,10 +205,12 @@ impl TypeCheck for Init {
 
 impl TypeCheck for Block {
     fn check_type(&self, env: &mut SymbolTable, errs: &mut Vec<String>) -> Ty {
+        env.enter();
         let mut ret_ty = Ty::Void;
         for stmt in self.0.iter() {
             ret_ty = stmt.check_type(env, errs);
         }
+        env.leave();
         ret_ty
     }
 }
@@ -194,21 +228,18 @@ impl TypeCheck for Stmt {
                 f_branch,
             } => {
                 let cond_ty = cond.check_type(env, errs);
-                if cond_ty != Ty::Bool {
-                    errs.push(format!("condition of if clause must be boolean type, found {cond_ty}"));
+                if cond_ty != Ty::Bool && cond_ty != Ty::Unknown {
+                    errs.push(format!(
+                        "condition of if statement must be boolean type, found {cond_ty}"
+                    ));
                 }
 
-                env.enter();
                 let t_ty = t_branch.check_type(env, errs);
-                env.leave();
                 if t_ty != Ty::Void {
                     return t_ty;
                 }
                 if let Some(f_branch) = f_branch {
-                    env.enter();
-                    let ty = f_branch.check_type(env, errs);
-                    env.leave();
-                    ty
+                    f_branch.check_type(env, errs)
                 } else {
                     Ty::Void
                 }
@@ -224,25 +255,19 @@ impl TypeCheck for Stmt {
                 }
                 if let Some(cond) = cond {
                     let cond_ty = cond.check_type(env, errs);
-                    if cond_ty != Ty::Bool {
-                        errs.push(format!("condition of for clause must be boolean type, found {cond_ty}"));
+                    if cond_ty != Ty::Bool && cond_ty != Ty::Unknown {
+                        errs.push(format!(
+                            "condition of for statement must be boolean type, found {cond_ty}"
+                        ));
                     }
                 }
                 if let Some(update) = update {
                     update.check_type(env, errs);
                 }
 
-                env.enter();
-                let ret_ty = body.check_type(env, errs);
-                env.leave();
-                ret_ty
+                body.check_type(env, errs)
             }
-            Block(block) => {
-                env.enter();
-                let ret_ty = block.check_type(env, errs);
-                env.leave();
-                ret_ty
-            },
+            Block(block) => block.check_type(env, errs),
         }
     }
 }

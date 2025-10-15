@@ -29,7 +29,7 @@ impl Display for Ty {
                     "unknown".to_string()
                 };
                 write!(f, "{}", format!("array [{arr_size}] {ty}"))
-            },
+            }
             Func { .. } => write!(f, "function"),
             Void => write!(f, "void"),
             Unknown => write!(f, "unknown"),

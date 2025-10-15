@@ -1,8 +1,12 @@
-use crate::{ast::Program, semantic::{symbol_table::SymbolTable, type_check::TypeCheck}};
+use crate::{
+    ast::Program,
+    semantic::{symbol_table::SymbolTable, type_check::TypeCheck},
+};
 
-pub mod symbol_table;
-pub mod type_check;
-pub mod types;
+mod symbol_table;
+mod type_check;
+mod types;
+mod control_flow;
 
 impl Program {
     pub fn semantic_check(&self) -> Vec<String> {
