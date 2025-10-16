@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::semantic::types::Ty;
+use crate::{ast::NodeId, semantic::types::Ty};
 
 pub struct SymbolTable(Vec<Scope>);
 
@@ -29,6 +29,7 @@ pub struct FunctionContext {
 pub struct Environement {
     symbols: SymbolTable,
     pub func_ctx: Option<FunctionContext>,
+    ast_node_types: HashMap<NodeId, Ty>,
 }
 
 impl Environement {
@@ -36,6 +37,7 @@ impl Environement {
         Self {
             symbols: SymbolTable::global(),
             func_ctx: None,
+            ast_node_types: HashMap::new(),
         }
     }
 
@@ -58,5 +60,13 @@ impl Environement {
         if let Some(s) = self.symbols.0.last_mut() {
             s.vars.insert(id.to_string(), ty);
         }
+    }
+
+    pub fn record_node_ty(&mut self, id: NodeId, ty: Ty) {
+        self.ast_node_types.insert(id, ty);
+    }
+
+    pub fn get_node_ty(&self, id: &NodeId) -> Option<Ty> {
+        self.ast_node_types.get(id).cloned()
     }
 }

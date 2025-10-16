@@ -1,23 +1,57 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Deref};
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct NodeId(pub u32);
+
+pub struct NodeIdGenerator(u32);
+
+impl NodeIdGenerator {
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn get_id(&mut self) -> NodeId {
+        let id = self.0;
+        self.0 += 1;
+        NodeId(id)
+    }
+}
 
 #[derive(Debug)]
-pub struct Program(pub Vec<Decl>);
+pub struct SpannedNode<T> {
+    pub id: NodeId,
+    pub node: T,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl<T> SpannedNode<T> {
+    pub fn new(id_gen: &mut NodeIdGenerator, node: T, start: usize, end: usize) -> Self {
+        Self { id: id_gen.get_id(), node, start, end }
+    }
+}
+
+#[derive(Debug)]
+pub struct Program(pub Vec<SpannedNode<Decl>>);
+
+#[derive(Debug)]
+pub struct Ident(pub String);
 
 #[derive(Debug)]
 pub enum Decl {
     Var {
-        id: String,
-        ty: Ty,
-        init: Option<Init>,
+        ident: SpannedNode<Ident>,
+        ty: SpannedNode<Ty>,
+        init: Option<SpannedNode<Init>>,
     },
     ExternFunc {
-        id: String,
-        sig: FuncSig,
+        ident: SpannedNode<Ident>,
+        sig: SpannedNode<FuncSig>,
     },
     Func {
-        id: String,
-        sig: FuncSig,
-        body: Block,
+        ident: SpannedNode<Ident>,
+        sig: SpannedNode<FuncSig>,
+        body: SpannedNode<Block>,
     },
 }
 
@@ -27,59 +61,59 @@ pub enum Ty {
     Bool,
     Char,
     Str,
-    Arr { arr_size: Option<i32>, ty: Box<Ty> },
+    Arr { arr_size: Option<i32>, ty: Box<SpannedNode<Ty>> },
     Void,
 }
 
 #[derive(Debug)]
 pub enum Init {
-    Arr(Vec<Expr>),
-    Expr(Expr),
+    Arr(Vec<SpannedNode<Expr>>),
+    Expr(SpannedNode<Expr>),
 }
 
 #[derive(Debug)]
 pub struct FuncSig {
-    pub ret_ty: Ty,
-    pub params: Vec<Param>,
+    pub ret_ty: SpannedNode<Ty>,
+    pub params: Vec<SpannedNode<Param>>,
 }
 
 #[derive(Debug)]
 pub struct Param {
-    pub id: String,
-    pub ty: Ty,
+    pub ident: SpannedNode<Ident>,
+    pub ty: SpannedNode<Ty>,
 }
 
 #[derive(Debug)]
-pub struct Block(pub Vec<Stmt>);
+pub struct Block(pub Vec<SpannedNode<Stmt>>);
 
 #[derive(Debug)]
 pub enum Expr {
-    Group(Box<Expr>),
-    Id(String),
+    Group(Box<SpannedNode<Expr>>),
+    Id(SpannedNode<Ident>),
     Int(i32),
     Bool(Bool),
     Str(String),
     Char(char),
     ArrSubscript {
-        id: String,
-        index: Box<Expr>,
+        ident: SpannedNode<Ident>,
+        index: Box<SpannedNode<Expr>>,
     },
     FuncCall {
-        id: String,
-        args: Vec<Expr>,
+        ident: SpannedNode<Ident>,
+        args: Vec<SpannedNode<Expr>>,
     },
     Unary {
-        expr: Box<Expr>,
+        expr: Box<SpannedNode<Expr>>,
         op: UnaryOp,
     },
     Binary {
-        le: Box<Expr>,
+        le: Box<SpannedNode<Expr>>,
         op: BinaryOp,
-        re: Box<Expr>,
+        re: Box<SpannedNode<Expr>>,
     },
     Assign {
-        lv: String,
-        expr: Box<Expr>,
+        lv: SpannedNode<Ident>,
+        expr: Box<SpannedNode<Expr>>,
     },
 }
 
@@ -153,25 +187,33 @@ impl Display for BinaryOp {
 
 #[derive(Debug)]
 pub enum Stmt {
-    Decl(Decl),
-    Expr(Expr),
-    Ret(Expr),
+    Decl(SpannedNode<Decl>),
+    Expr(SpannedNode<Expr>),
+    Ret(SpannedNode<Expr>),
     If {
-        cond: Expr,
-        t_branch: Block,
-        f_branch: Option<Block>,
+        cond: SpannedNode<Expr>,
+        t_branch: SpannedNode<Block>,
+        f_branch: Option<SpannedNode<Block>>,
     },
     For {
-        init: Option<Expr>,
-        cond: Option<Expr>,
-        update: Option<Expr>,
-        body: Block,
+        init: Option<SpannedNode<Expr>>,
+        cond: Option<SpannedNode<Expr>>,
+        update: Option<SpannedNode<Expr>>,
+        body: SpannedNode<Block>,
     },
-    Block(Block),
+    Block(SpannedNode<Block>),
 }
 
 #[derive(Debug)]
 pub enum Bool {
     True,
     False,
+}
+
+impl<T> Deref for SpannedNode<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.node
+    }
 }

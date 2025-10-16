@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Deref};
 
 use crate::ast;
 
@@ -46,7 +46,7 @@ impl From<&ast::Ty> for Ty {
             ast::Ty::Str => Self::Str,
             ast::Ty::Arr { arr_size, ty } => Self::Arr {
                 arr_size: *arr_size,
-                ty: Box::new(ty.as_ref().into()),
+                ty: Box::new((**ty).deref().into()),
             },
             ast::Ty::Void => Self::Void,
         }
@@ -56,8 +56,8 @@ impl From<&ast::Ty> for Ty {
 impl From<&ast::FuncSig> for Ty {
     fn from(value: &ast::FuncSig) -> Self {
         Self::Func {
-            params: value.params.iter().map(|p| (&p.ty).into()).collect(),
-            ret_ty: Box::new((&value.ret_ty).into()),
+            params: value.params.iter().map(|p| p.ty.deref().into()).collect(),
+            ret_ty: Box::new(value.ret_ty.deref().into()),
         }
     }
 }

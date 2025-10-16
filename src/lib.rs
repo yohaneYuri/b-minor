@@ -7,4 +7,5 @@ lalrpop_mod!(
 );
 
 pub mod ast;
+pub mod ir;
 pub mod semantic;

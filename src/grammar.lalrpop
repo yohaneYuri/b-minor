@@ -2,9 +2,8 @@ use crate::ast::*;
 
 use std::str::FromStr;
 
-grammar;
+grammar(id_gen: &mut NodeIdGenerator);
 
-Id: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 Int: i32 = r"[0-9]+" => i32::from_str(<>).unwrap();
 Str: String = r#""[^"]*""# => <>.to_string();
 Char: char = r"'[^']'" => <>.chars().nth(1).unwrap();
@@ -17,96 +16,106 @@ Deli<T, D>: Vec<T> = <mut v:(<T> D)*> <e:T?> => match e {
   }
 };
 
+Id: SpannedNode<Ident> = <l:@L> <s:r"[_a-zA-Z][_a-zA-Z0-9]*"> <r:@R> => SpannedNode::new(id_gen, Ident(s.to_string()), l, r);
+
 pub Program: Program = Decl* => Program(<>);
 
-pub Decl: Decl = {
-  <id:Id> ":" <ty:Ty> <init:("=" <Init>)?> ";" => Decl::Var { id, ty, init },
+pub Decl: SpannedNode<Decl> = {
+  <l:@L> <ident:Id> ":" <ty:Ty> <init:("=" <Init>)?> ";" <r:@R>
+    => SpannedNode::new(id_gen, Decl::Var { ident, ty, init }, l, r),
   // external function
-  <id:Id> ":" <sig:FuncSig> ";" => Decl::ExternFunc { id, sig },
-  <id:Id> ":" <sig:FuncSig> "=" <body:Block> => Decl::Func { id, sig, body },
+  <l:@L> <ident:Id> ":" <sig:FuncSig> ";" <r:@R>
+    => SpannedNode::new(id_gen, Decl::ExternFunc { ident, sig }, l, r),
+  <l:@L> <ident:Id> ":" <sig:FuncSig> "=" <body:Block> <r:@R>
+    => SpannedNode::new(id_gen, Decl::Func { ident, sig, body }, l, r),
 };
 
-pub Ty: Ty = {
-  "integer" => Ty::Int,
-  "boolean" => Ty::Bool,
-  "char" => Ty::Char,
-  "string" => Ty::Str,
-  "array" "[" <arr_size:Int?> "]" <ty:Ty> => Ty::Arr { arr_size, ty: Box::new(ty) },
-  "void" => Ty::Void,
+pub Ty: SpannedNode<Ty> = {
+  <l:@L> "integer" <r:@R> => SpannedNode::new(id_gen, Ty::Int, l, r),
+  <l:@L> "boolean" <r:@R> => SpannedNode::new(id_gen, Ty::Bool, l, r),
+  <l:@L> "char" <r:@R> => SpannedNode::new(id_gen, Ty::Char, l, r),
+  <l:@L> "string" <r:@R> => SpannedNode::new(id_gen, Ty::Str, l, r),
+  <l:@L> "array" <r:@R> "[" <arr_size:Int?> "]" <ty:Ty>
+    => SpannedNode::new(id_gen, Ty::Arr { arr_size, ty: Box::new(ty) }, l, r),
+  <l:@L> "void" <r:@R> => SpannedNode::new(id_gen, Ty::Void, l, r),
 };
 
-pub Init: Init = {
+pub Init: SpannedNode<Init> = {
   // array initializer
-  "{" <Deli<Expr, ",">> "}" => Init::Arr(<>),
-  Expr => Init::Expr(<>),
+  <l:@L> "{" <a:Deli<Expr, ",">> "}" <r:@R> => SpannedNode::new(id_gen, Init::Arr(a), l, r),
+  <l:@L> <e:Expr> <r:@R> => SpannedNode::new(id_gen, Init::Expr(e), l, r),
 };
 
-pub FuncSig: FuncSig = "function" <ret_ty:Ty> "(" <params:Deli<Param, ",">> ")" => FuncSig { ret_ty, params };
+pub FuncSig: SpannedNode<FuncSig>
+  = <l:@L> "function" <ret_ty:Ty> "(" <params:Deli<Param, ",">> ")" <r:@R>
+  => SpannedNode::new(id_gen, FuncSig { ret_ty, params }, l, r);
 
-pub Param: Param = <id:Id> ":" <ty:Ty> => Param { id, ty };
+pub Param: SpannedNode<Param> = <l:@L> <ident:Id> ":" <ty:Ty> <r:@R>
+  => SpannedNode::new(id_gen, Param { ident, ty }, l, r);
 
-pub Block: Block = "{" <Stmt*> "}" => Block(<>);
+pub Block: SpannedNode<Block> = <l:@L> "{" <s:Stmt*> "}" <r:@R>
+  => SpannedNode::new(id_gen, Block(s), l, r);
 
-pub Expr: Expr = {
+pub Expr: SpannedNode<Expr> = {
   #[precedence(level = "0")]
   // group
-  "(" <Expr> ")" => Expr::Group(Box::new(<>)),
+  <l:@L> "(" <e:Expr> ")" <r:@R> => SpannedNode::new(id_gen, Expr::Group(Box::new(e)), l, r),
   // identifier
-  Id => Expr::Id(<>),
-  Int => Expr::Int(<>),
-  Str => Expr::Str(<>),
-  Char => Expr::Char(<>),
+  <l:@L> <i:Id> <r:@R> => SpannedNode::new(id_gen, Expr::Id(i), l, r),
+  <l:@L> <i:Int> <r:@R> => SpannedNode::new(id_gen, Expr::Int(i), l, r),
+  <l:@L> <s:Str> <r:@R> => SpannedNode::new(id_gen, Expr::Str(s), l, r),
+  <l:@L> <c:Char> <r:@R> => SpannedNode::new(id_gen, Expr::Char(c), l, r),
   // boolean
-  "true" => Expr::Bool(Bool::True),
-  "false" => Expr::Bool(Bool::False),
+  <l:@L> "true" <r:@R> => SpannedNode::new(id_gen, Expr::Bool(Bool::True), l, r),
+  <l:@L> "false" <r:@R> => SpannedNode::new(id_gen, Expr::Bool(Bool::False), l, r),
   #[precedence(level = "1")]
   // array subscript
-  <id:Id> "[" <index:Expr> "]" => Expr::ArrSubscript { id, index: Box::new(index) },
+  <l:@L> <ident:Id> "[" <index:Expr> "]" <r:@R> => SpannedNode::new(id_gen, Expr::ArrSubscript { ident, index: Box::new(index) }, l, r),
   // function call
-  <id:Id> "(" <args:Deli<Expr, ",">> ")" => Expr::FuncCall { id, args },
+  <l:@L> <ident:Id> "(" <args:Deli<Expr, ",">> ")" <r:@R> => SpannedNode::new(id_gen, Expr::FuncCall { ident, args }, l, r),
   #[precedence(level = "2")] #[assoc(side = "right")]
   // postfix increment, decrement
-  <Expr> "++" => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Incre },
-  <Expr> "--" => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Decre },
+  <l:@L> <e:Expr> "++" <r:@R> => SpannedNode::new(id_gen, Expr::Unary { expr: Box::new(e), op: UnaryOp::Incre }, l, r),
+  <l:@L> <e:Expr> "--" <r:@R> => SpannedNode::new(id_gen, Expr::Unary { expr: Box::new(e), op: UnaryOp::Decre }, l, r),
   #[precedence(level = "3")] #[assoc(side = "right")]
   // unary negation
-  "-" <Expr> => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Neg },
+  <l:@L> "-" <e:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Unary { expr: Box::new(e), op: UnaryOp::Neg }, l, r),
   // logical not
-  "!" <Expr> => Expr::Unary { expr: Box::new(<>), op: UnaryOp::Not },
+  <l:@L> "!" <e:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Unary { expr: Box::new(e), op: UnaryOp::Not }, l, r),
   #[precedence(level = "4")] #[assoc(side = "right")]
   // exponentiation
-  <le:Expr> "^" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Exp, re: Box::new(re) },
+  <l:@L> <le:Expr> "^" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Exp, re: Box::new(re) }, l, r),
   #[precedence(level = "5")] #[assoc(side = "left")]
   // multiplication, division, modulus
-  <le:Expr> "*" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Mul, re: Box::new(re) },
-  <le:Expr> "/" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Div, re: Box::new(re) },
-  <le:Expr> "%" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Mod, re: Box::new(re) },
+  <l:@L> <le:Expr> "*" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Mul, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "/" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Div, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "%" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Mod, re: Box::new(re) }, l, r),
   #[precedence(level = "6")] #[assoc(side = "left")]
   // addition, subtraction
-  <le:Expr> "+" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Add, re: Box::new(re) },
-  <le:Expr> "-" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Sub, re: Box::new(re) },
+  <l:@L> <le:Expr> "+" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Add, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "-" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Sub, re: Box::new(re) }, l, r),
   #[precedence(level = "7")] #[assoc(side = "left")]
   // comparison
-  <le:Expr> "<" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Lt, re: Box::new(re) },
-  <le:Expr> "<=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Le, re: Box::new(re) },
-  <le:Expr> ">" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Gt, re: Box::new(re) },
-  <le:Expr> ">=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Ge, re: Box::new(re) },
-  <le:Expr> "==" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Eq, re: Box::new(re) },
-  <le:Expr> "!=" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::NotEq, re: Box::new(re) },
+  <l:@L> <le:Expr> "<" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Lt, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "<=" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Le, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> ">" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Gt, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> ">=" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Ge, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "==" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Eq, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "!=" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::NotEq, re: Box::new(re) }, l, r),
   #[precedence(level = "8")] #[assoc(side = "left")]
   // logical and, logical or
-  <le:Expr> "&&" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::And, re: Box::new(re) },
-  <le:Expr> "||" <re:Expr> => Expr::Binary { le: Box::new(le), op: BinaryOp::Or, re: Box::new(re) },
+  <l:@L> <le:Expr> "&&" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::And, re: Box::new(re) }, l, r),
+  <l:@L> <le:Expr> "||" <re:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Binary { le: Box::new(le), op: BinaryOp::Or, re: Box::new(re) }, l, r),
   #[precedence(level = "9")] #[assoc(side = "right")]
   // assignment
-  <lv:Id> "=" <expr:Expr> => Expr::Assign { lv, expr: Box::new(expr) },
+  <l:@L> <lv:Id> "=" <expr:Expr> <r:@R> => SpannedNode::new(id_gen, Expr::Assign { lv, expr: Box::new(expr) }, l, r),
 };
 
-pub Stmt: Stmt = {
-  Decl => Stmt::Decl(<>),
-  <Expr> ";" => Stmt::Expr(<>),
-  "return" <Expr> ";" => Stmt::Ret(<>),
-  "if" "(" <cond:Expr> ")" <t_branch:Block> <f_branch:("else" <Block>)?> => Stmt::If { cond, t_branch, f_branch },
-  "for" "(" <init:Expr?> ";" <cond:Expr?> ";" <update:Expr?> ")" <body:Block> => Stmt::For { init, cond, update, body },
-  Block => Stmt::Block(<>),
+pub Stmt: SpannedNode<Stmt> = {
+  <l:@L> <d:Decl> <r:@R> => SpannedNode::new(id_gen, Stmt::Decl(d), l, r),
+  <l:@L> <e:Expr> ";" <r:@R> => SpannedNode::new(id_gen, Stmt::Expr(e), l, r),
+  <l:@L> "return" <e:Expr> ";" <r:@R> => SpannedNode::new(id_gen, Stmt::Ret(e), l, r),
+  <l:@L> "if" "(" <cond:Expr> ")" <t_branch:Block> <f_branch:("else" <Block>)?> <r:@R> => SpannedNode::new(id_gen, Stmt::If { cond, t_branch, f_branch }, l, r),
+  <l:@L> "for" "(" <init:Expr?> ";" <cond:Expr?> ";" <update:Expr?> ")" <body:Block> <r:@R> => SpannedNode::new(id_gen, Stmt::For { init, cond, update, body }, l, r),
+  <l:@L> <b:Block> <r:@R> => SpannedNode::new(id_gen, Stmt::Block(b), l, r),
 };
