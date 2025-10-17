@@ -27,7 +27,12 @@ pub struct SpannedNode<T> {
 
 impl<T> SpannedNode<T> {
     pub fn new(id_gen: &mut NodeIdGenerator, node: T, start: usize, end: usize) -> Self {
-        Self { id: id_gen.get_id(), node, start, end }
+        Self {
+            id: id_gen.get_id(),
+            node,
+            start,
+            end,
+        }
     }
 }
 
@@ -61,7 +66,10 @@ pub enum Ty {
     Bool,
     Char,
     Str,
-    Arr { arr_size: Option<i32>, ty: Box<SpannedNode<Ty>> },
+    Arr {
+        arr_size: Option<i32>,
+        ty: Box<SpannedNode<Ty>>,
+    },
     Void,
 }
 

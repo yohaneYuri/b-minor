@@ -2,10 +2,7 @@ use std::ops::Deref;
 
 use crate::{
     ast::{BinaryOp, Expr, Ident, Init, SpannedNode, UnaryOp},
-    semantic::{
-        environment::Environement,
-        types::Ty,
-    },
+    semantic::{environment::Environement, types::Ty},
 };
 
 pub trait TypeInfer {

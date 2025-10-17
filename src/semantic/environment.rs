@@ -1,72 +1,77 @@
 use std::collections::HashMap;
 
-use crate::{ast::NodeId, semantic::types::Ty};
+use crate::{
+    ast::NodeId,
+    semantic::{context::GlobalCtx, symbol::SymbolId, types::Ty},
+};
 
-pub struct SymbolTable(Vec<Scope>);
-
-impl SymbolTable {
-    pub fn global() -> Self {
-        Self(vec![Scope::new()])
-    }
-}
-
+#[derive(Debug)]
 pub struct Scope {
-    vars: HashMap<String, Ty>,
+    symbols: HashMap<String, SymbolId>,
 }
 
 impl Scope {
     pub fn new() -> Self {
         Self {
-            vars: HashMap::new(),
+            symbols: HashMap::new(),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionContext {
     pub ret_ty: Ty,
 }
 
-pub struct Environement {
-    symbols: SymbolTable,
+#[derive(Debug)]
+pub struct Environement<'ctx> {
+    global: &'ctx mut GlobalCtx,
+    scopes: Vec<Scope>,
     pub func_ctx: Option<FunctionContext>,
-    ast_node_types: HashMap<NodeId, Ty>,
 }
 
-impl Environement {
-    pub fn new() -> Self {
+impl<'ctx> Environement<'ctx> {
+    pub fn new(global: &'ctx mut GlobalCtx) -> Self {
         Self {
-            symbols: SymbolTable::global(),
+            global,
+            scopes: Vec::new(),
             func_ctx: None,
-            ast_node_types: HashMap::new(),
         }
     }
 
     pub fn enter(&mut self) {
-        self.symbols.0.push(Scope::new());
+        self.scopes.push(Scope::new());
     }
 
     pub fn leave(&mut self) {
         // protect the global scope
-        if self.symbols.0.len() > 1 {
-            self.symbols.0.pop();
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
         }
     }
 
     pub fn lookup(&self, id: &str) -> Option<&Ty> {
-        self.symbols.0.iter().rev().find_map(|s| s.vars.get(id))
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.symbols.get(id))
+            .map(|id| self.global.get_symbol(*id))
+            .flatten()
+            .map(|s| &s.ty)
     }
 
-    pub fn bind(&mut self, id: &str, ty: Ty) {
-        if let Some(s) = self.symbols.0.last_mut() {
-            s.vars.insert(id.to_string(), ty);
+    pub fn bind(&mut self, id: &str, ty: Ty, node_id: NodeId) {
+        if let Some(s) = self.scopes.last_mut() {
+            let sym_id = self.global.new_symbol(id, ty, node_id);
+            s.symbols.insert(id.to_string(), sym_id);
         }
     }
 
     pub fn record_node_ty(&mut self, id: NodeId, ty: Ty) {
-        self.ast_node_types.insert(id, ty);
+        self.global.record_node_ty(id, ty);
     }
 
-    pub fn get_node_ty(&self, id: &NodeId) -> Option<Ty> {
-        self.ast_node_types.get(id).cloned()
+    pub fn get_node_ty(&self, id: NodeId) -> Option<&Ty> {
+        self.global.get_node_ty(id)
     }
 }

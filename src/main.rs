@@ -12,9 +12,7 @@ fn main() {
     ";
 
     let mut id_gen = NodeIdGenerator::new();
-    let program = ProgramParser::new()
-        .parse(&mut id_gen, src)
-        .unwrap();
+    let program = ProgramParser::new().parse(&mut id_gen, src).unwrap();
     println!("{:?}", program);
 
     program
